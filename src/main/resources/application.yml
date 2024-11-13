@@ -1,0 +1,32 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://192.168.137.135:5432/springbootdb
+    username: postgres
+    password: admin@123
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        proc:
+          param:
+            null_passing: true
+        connection:
+          isolation: 2
+        format_sql: true
+        generate_statistics: false
+    open-in-view: false
+  jackson:
+    default-property-inclusion: non_null
+
+application:
+  minio:
+    url: http://192.168.137.135:9000
+    access-key: DNJKPraEDeArrWJ5wC5N
+    secret-key: apFsDfExie0bpFF14zUu5oqq1BLkjs0GuVu3k72I
+    bucket-name: spring
