@@ -4,7 +4,6 @@ import com.opencsv.CSVReader;
 import com.opencsv.CSVWriter;
 import com.opencsv.exceptions.CsvException;
 import lombok.extern.slf4j.Slf4j;
-import org.modelmapper.ModelMapper;
 import org.mos.vcs.dto.UserDto;
 
 import java.io.*;
@@ -14,7 +13,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -24,7 +22,6 @@ import java.util.List;
 
 @Slf4j
 public class CsvHelper implements FileHelper {
-    static final ModelMapper modelMapper = new ModelMapper();
 
     @Override
     public List<UserDto> read(InputStream inputStream) throws IOException, CsvException {
@@ -37,10 +34,7 @@ public class CsvHelper implements FileHelper {
             List<UserDto> dtos = new ArrayList<>();
 
             for (String[] string : strings) {
-                log.info("Row {}", Arrays.toString(string));
                 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss");
-
-                log.info("Date {}", string[6]);
 
                 LocalDateTime localDateTime;
                 Instant instant;
@@ -51,6 +45,8 @@ public class CsvHelper implements FileHelper {
                     log.error("Invalid date format: {}", string[6]);
                     instant = null;
                 }
+
+
 
                 UserDto dto = UserDto.builder()
                         .username(string[0])

@@ -43,8 +43,10 @@ public class UserController {
 
     @PostMapping("/upload")
     public ResponseEntity<?> upload(@RequestParam MultipartFile file) throws IOException, CsvException {
+        long start = System.currentTimeMillis();
         ImportResponse response = fileService.uploadFile(file);
         log.info("Import response: {}", response);
+        log.info("Time: {}", System.currentTimeMillis() - start);
         return ResponseEntity.ok(response);
     }
 

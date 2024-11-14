@@ -26,7 +26,7 @@ public class User {
     @Id
     @BatchSequence(
             name = "post_sequence",
-            fetchSize = 5
+            fetchSize = 25
     )
     private Long id;
     private String username;
