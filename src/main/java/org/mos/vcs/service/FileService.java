@@ -38,6 +38,7 @@ public class FileService {
 
     public ImportResponse uploadFile(MultipartFile file) throws IOException, CsvException {
         FileHelper fileHelper = new CsvHelper();
+
         List<UserDto> dtos = fileHelper.read(file.getInputStream());
 
         List<User> users = new ArrayList<>();
@@ -53,8 +54,14 @@ public class FileService {
             map.put(dto.getUsername() + dto.getEmail(), 1);
 
             Set<ConstraintViolation<UserDto>> violations = validator.validate(dto);
+
             if (violations.isEmpty()) {
-                users.add(modelMapper.map(dto, User.class));
+                users.add(
+                        userRepository
+                                .findByUsernameAndEmailAndPhone(dto.getUsername(), dto.getEmail(), dto.getPhone())
+                                .map(u -> this.setNewData(dto, u))
+                                .orElseGet(() -> modelMapper.map(dto, User.class))
+                );
             } else {
                 InvalidUser invalidUser = modelMapper.map(dto, InvalidUser.class);
                 String errorMessages = violations.stream()
@@ -75,7 +82,7 @@ public class FileService {
             storageEngineService.uploadFile(filePath, fileName, "text/csv");
         }
 
-        userRepository.saveAllAndFlush(users);
+        userRepository.saveAll(users);
 
         return ImportResponse.builder()
                 .successCount(users.size())
@@ -83,4 +90,13 @@ public class FileService {
                 .fileName(fileName)
                 .build();
     }
+
+    private User setNewData(UserDto dto, User user) {
+        user.setPassword(dto.getPassword());
+        user.setAddress(dto.getAddress());
+        user.setRole(dto.getRole());
+        user.setCreatedDate(dto.getCreatedDate());
+        return user;
+    }
+
 }
