@@ -21,7 +21,14 @@ import java.util.List;
  */
 
 @Slf4j
-public class CsvHelper implements FileHelper {
+class CsvHelper implements FileHelper {
+
+    private CsvHelper() {
+    }
+
+    public static CsvHelper getInstance() {
+        return CsvHelperHolder.INSTANCE;
+    }
 
     @Override
     public List<UserDto> read(InputStream inputStream) throws IOException, CsvException {
@@ -46,8 +53,6 @@ public class CsvHelper implements FileHelper {
                     instant = null;
                 }
 
-
-
                 UserDto dto = UserDto.builder()
                         .username(string[0])
                         .password(string[1])
@@ -69,6 +74,10 @@ public class CsvHelper implements FileHelper {
             writer.writeNext(INVALID_HEADER);
             writer.writeAll(list);
         }
+    }
+
+    private static class CsvHelperHolder {
+        private static final CsvHelper INSTANCE = new CsvHelper();
     }
 
 }

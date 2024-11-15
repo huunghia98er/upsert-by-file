@@ -1,18 +1,22 @@
 package org.mos.vcs.service;
 
 import com.opencsv.exceptions.CsvException;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.transaction.Transactional;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.Session;
 import org.modelmapper.ModelMapper;
 import org.mos.vcs.dto.ImportResponse;
 import org.mos.vcs.dto.InvalidUser;
 import org.mos.vcs.dto.UserDto;
 import org.mos.vcs.entity.User;
 import org.mos.vcs.repository.UserRepository;
-import org.mos.vcs.service.component.CsvHelper;
 import org.mos.vcs.service.component.FileHelper;
+import org.mos.vcs.service.component.FileHelperFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -29,15 +33,18 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
+@Transactional
 @RequiredArgsConstructor
 public class FileService {
     private final ModelMapper modelMapper;
     private final UserRepository userRepository;
     private final Validator validator;
+    @PersistenceContext
+    private final EntityManager entityManager;
     private final StorageEngineService storageEngineService;
 
     public ImportResponse uploadFile(MultipartFile file) throws IOException, CsvException {
-        FileHelper fileHelper = new CsvHelper();
+        FileHelper fileHelper = FileHelperFactory.getFileHelper(file.getContentType());
 
         List<UserDto> dtos = fileHelper.read(file.getInputStream());
 
@@ -45,23 +52,37 @@ public class FileService {
         List<String[]> invalidUsers = new ArrayList<>();
         Map<String, Integer> map = new HashMap<>();
 
+        List<String> usernames = dtos.stream().map(UserDto::getUsername).toList();
+        List<String> emails = dtos.stream().map(UserDto::getEmail).toList();
+        List<String> phones = dtos.stream().map(UserDto::getPhone).toList();
+
+        List<User> existingUsers = userRepository.findByUsernameInAndEmailInAndPhoneIn(usernames, emails, phones);
+
+        Map<String, User> existingUserMap = existingUsers.stream()
+                .collect(Collectors.toMap(
+                        u -> u.getUsername() + u.getEmail() + u.getPhone(),
+                        u -> u));
+
         for (UserDto dto : dtos) {
-            if (map.containsKey(dto.getUsername() + dto.getEmail())) {
+            String userKey = dto.getUsername() + dto.getEmail() + dto.getPhone();
+
+            if (map.containsKey(userKey)) {
                 log.warn("Duplicate record: {}", dto);
                 users.remove(modelMapper.map(dto, User.class));
                 continue;
             }
-            map.put(dto.getUsername() + dto.getEmail(), 1);
+            map.put(userKey, 1);
 
             Set<ConstraintViolation<UserDto>> violations = validator.validate(dto);
 
             if (violations.isEmpty()) {
-                users.add(
-                        userRepository
-                                .findByUsernameAndEmailAndPhone(dto.getUsername(), dto.getEmail(), dto.getPhone())
-                                .map(u -> this.setNewData(dto, u))
-                                .orElseGet(() -> modelMapper.map(dto, User.class))
-                );
+                User existingUser = existingUserMap.get(userKey);
+
+                User user = Optional.ofNullable(existingUser)
+                                .map(u -> setNewData(dto, existingUser))
+                                        .orElseGet(() -> modelMapper.map(dto, User.class));
+
+                users.add(user);
             } else {
                 InvalidUser invalidUser = modelMapper.map(dto, InvalidUser.class);
                 String errorMessages = violations.stream()
@@ -76,19 +97,48 @@ public class FileService {
         String fileName = null;
         String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("ddMMyyyyHHmmss"));
         if (!invalidUsers.isEmpty()) {
+            // TODO Write a file with the same type as the input file
             fileName = "invalid_users_" + time;
             String filePath = "./data/" + fileName + ".csv";
             fileHelper.write(invalidUsers, filePath);
             storageEngineService.uploadFile(filePath, fileName, "text/csv");
         }
 
-        userRepository.saveAll(users);
+        if (!users.isEmpty()) {
+            upsertUsers(users);
+        }
 
         return ImportResponse.builder()
                 .successCount(users.size())
                 .failCount(invalidUsers.size())
                 .fileName(fileName)
                 .build();
+    }
+
+    protected void upsertUsers(List<User> users) {
+        Session session = entityManager.unwrap(Session.class);
+
+        try (session) {
+            final int batchSize = 200;
+            for (int i = 0; i < users.size(); i++) {
+                session.merge(users.get(i));
+
+                if ((i + 1) % batchSize == 0) {
+                    log.info("Flush a batch of INSERT & release memory: {} time(s)", (i + 1) / batchSize);
+                    session.flush();
+                    session.clear();
+                }
+            }
+
+            session.flush();
+            session.clear();
+
+            log.info("Flush the last time at commit time");
+
+        } catch (Exception e) {
+            log.error("Error during upsertUsers operation", e);
+            throw e;
+        }
     }
 
     private User setNewData(UserDto dto, User user) {

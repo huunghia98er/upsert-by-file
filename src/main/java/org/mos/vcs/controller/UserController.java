@@ -43,6 +43,9 @@ public class UserController {
 
     @PostMapping("/upload")
     public ResponseEntity<?> upload(@RequestParam MultipartFile file) throws IOException, CsvException {
+        if (file.isEmpty()) {
+            return ResponseEntity.badRequest().body("File is empty");
+        }
         long start = System.currentTimeMillis();
         ImportResponse response = fileService.uploadFile(file);
         log.info("Import response: {}", response);
