@@ -97,7 +97,7 @@ public class FileService {
         String fileName = null;
         String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("ddMMyyyyHHmmss"));
         if (!invalidUsers.isEmpty()) {
-            // TODO Write a file with the same type as the input file
+            // TODO Create an invalid file that matches the type of the input file
             fileName = "invalid_users_" + time;
             String filePath = "./data/" + fileName + ".csv";
             fileHelper.write(invalidUsers, filePath);
