@@ -73,7 +73,7 @@ public class StorageEngineService {
                     outputStream.write(buffer, 0, bytesRead);
                 }
 
-                System.out.println("File đã được tải về thành công: " + filePath);
+                log.info("File đã được tải về thành công: " + filePath);
             }
         } catch (ErrorResponseException | InsufficientDataException | InternalException | InvalidKeyException |
                  InvalidResponseException | IOException | NoSuchAlgorithmException | ServerException |

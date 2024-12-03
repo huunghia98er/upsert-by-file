@@ -8,6 +8,7 @@ public class FileHelperFactory {
 
     public static FileHelper getFileHelper(String fileType) {
         return switch (fileType) {
+            case "application/vnd.ms-excel" -> ExcelHelper.getInstance();
             default -> CsvHelper.getInstance();
         };
     }
