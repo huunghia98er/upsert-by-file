@@ -44,68 +44,21 @@ public class FileService {
     private final StorageEngineService storageEngineService;
 
     public ImportResponse uploadFile(MultipartFile file) throws IOException, CsvException {
-        FileHelper fileHelper = FileHelperFactory.getFileHelper(file.getContentType());
+        FileHelper fileHelper = FileHelperFactory.getFileHelper(Objects.requireNonNull(file.getContentType()));
 
         List<UserDto> dtos = fileHelper.read(file.getInputStream());
 
-        List<User> users = new ArrayList<>();
         List<String[]> invalidUsers = new ArrayList<>();
-        Map<String, Integer> map = new HashMap<>();
+        Map<String, User> map = new HashMap<>();
 
-        List<String> usernames = dtos.stream().map(UserDto::getUsername).toList();
-        List<String> emails = dtos.stream().map(UserDto::getEmail).toList();
-        List<String> phones = dtos.stream().map(UserDto::getPhone).toList();
+        this.process(map, dtos, invalidUsers);
 
-        List<User> existingUsers = userRepository.findByUsernameInAndEmailInAndPhoneIn(usernames, emails, phones);
+        String fileName = this.saveFile(fileHelper, invalidUsers);
 
-        Map<String, User> existingUserMap = existingUsers.stream()
-                .collect(Collectors.toMap(
-                        u -> u.getUsername() + u.getEmail() + u.getPhone(),
-                        u -> u));
-
-        for (UserDto dto : dtos) {
-            String userKey = dto.getUsername() + dto.getEmail() + dto.getPhone();
-
-            if (map.containsKey(userKey)) {
-                log.warn("Duplicate record: {}", dto);
-                users.remove(modelMapper.map(dto, User.class));
-                continue;
-            }
-            map.put(userKey, 1);
-
-            Set<ConstraintViolation<UserDto>> violations = validator.validate(dto);
-
-            if (violations.isEmpty()) {
-                User existingUser = existingUserMap.get(userKey);
-
-                User user = Optional.ofNullable(existingUser)
-                                .map(u -> setNewData(dto, existingUser))
-                                        .orElseGet(() -> modelMapper.map(dto, User.class));
-
-                users.add(user);
-            } else {
-                InvalidUser invalidUser = modelMapper.map(dto, InvalidUser.class);
-                String errorMessages = violations.stream()
-                        .map(ConstraintViolation::getMessage)
-                        .collect(Collectors.joining("\n"));
-
-                invalidUser.setError(errorMessages);
-                invalidUsers.add(invalidUser.toStringArray());
-            }
-        }
-
-        String fileName = null;
-        String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("ddMMyyyyHHmmss"));
-        if (!invalidUsers.isEmpty()) {
-            // TODO Create an invalid file that matches the type of the input file
-            fileName = "invalid_users_" + time;
-            String filePath = "./data/" + fileName + ".csv";
-            fileHelper.write(invalidUsers, filePath);
-            storageEngineService.uploadFile(filePath, fileName, "text/csv");
-        }
+        List<User> users = new ArrayList<>(map.values());
 
         if (!users.isEmpty()) {
-            upsertUsers(users);
+            batchUpsertUsers(users);
         }
 
         return ImportResponse.builder()
@@ -115,7 +68,7 @@ public class FileService {
                 .build();
     }
 
-    protected void upsertUsers(List<User> users) {
+    protected void batchUpsertUsers(List<User> users) {
         Session session = entityManager.unwrap(Session.class);
 
         try (session) {
@@ -139,6 +92,75 @@ public class FileService {
             log.error("Error during upsertUsers operation", e);
             throw e;
         }
+    }
+
+    private void process(Map<String, User> map, List<UserDto> dtos, List<String[]> invalidUsers) {
+        Map<String, User> existingUserMap = userRepository.findByUsernameInAndEmailInAndPhoneIn(
+                        dtos.stream().map(UserDto::getUsername).toList(),
+                        dtos.stream().map(UserDto::getEmail).toList(),
+                        dtos.stream().map(UserDto::getPhone).toList()
+                )
+                .stream()
+                .collect(
+                        Collectors.toMap(
+                                u -> u.getUsername() + u.getEmail() + u.getPhone(),
+                                u -> u)
+                );
+
+        for (UserDto dto : dtos) {
+            String userKey = dto.getUsername() + dto.getEmail() + dto.getPhone();
+
+            if (map.containsKey(userKey)) {
+                log.warn("Duplicate record: {}", dto);
+                InvalidUser invalidUser = modelMapper.map(dto, InvalidUser.class);
+                String errorMessages = "Duplicate record";
+
+                invalidUser.setError(errorMessages);
+                invalidUsers.add(invalidUser.toStringArray());
+
+                InvalidUser existUser = modelMapper.map(map.get(userKey), InvalidUser.class);
+                existUser.setError(errorMessages);
+                invalidUsers.add(existUser.toStringArray());
+                continue;
+            }
+
+            Set<ConstraintViolation<UserDto>> violations = validator.validate(dto);
+
+            if (violations.isEmpty()) {
+                User existingUser = existingUserMap.get(userKey);
+
+                User user = Optional.ofNullable(existingUser)
+                        .map(u -> setNewData(dto, existingUser))
+                        .orElseGet(() -> modelMapper.map(dto, User.class));
+
+                map.put(userKey, user);
+            } else {
+                InvalidUser invalidUser = modelMapper.map(dto, InvalidUser.class);
+                String errorMessages = violations.stream()
+                        .map(ConstraintViolation::getMessage)
+                        .collect(Collectors.joining("\n"));
+
+                invalidUser.setError(errorMessages);
+                invalidUsers.add(invalidUser.toStringArray());
+            }
+        }
+    }
+
+    private String saveFile(FileHelper fileHelper, List<String[]> invalidUsers) {
+        if (invalidUsers.isEmpty())
+            return null;
+
+        String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("ddMMyyyyHHmmss"));
+        String fileName = "invalid_users_" + time;
+        String filePath = "./data/" + fileName + ".csv";
+        try {
+            fileHelper.write(invalidUsers, filePath);
+        } catch (IOException e) {
+            log.warn("Error while writing file", e);
+            return null;
+        }
+        storageEngineService.uploadFile(filePath, fileName, "text/csv");
+        return fileName;
     }
 
     private User setNewData(UserDto dto, User user) {
